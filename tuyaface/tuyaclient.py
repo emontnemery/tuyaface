@@ -111,16 +111,21 @@ class TuyaClient(threading.Thread):
                 if self.connection:
                     # poll the socket, as well as the socketpair to allow us to be interrupted
                     rlist = [self.connection, self.socketpair[0]]
+                    logger.debug("TuyaClient: ---------> Waiting for sockets")
                     can_read, _, _ = select.select(rlist, [], [], HEART_BEAT_PING_TIME/2)
+                    logger.debug("TuyaClient: <--------- Data in sockets: %s", can_read)
                     if self.connection in can_read:
                         try:
                             data = self.connection.recv(4096)
+                            logger.debug("TuyaClient: read from socket '%s' (%s)", data, len(data))
                             if data:
                                 for reply in _process_raw_reply(self.device, data):
                                     logger.debug("TuyaClient: Got msg %s", reply)
-                                    reply = json.loads(reply["data"])
+                                    json_reply = None
+                                    if reply["data"]:
+                                        json_reply = json.loads(reply["data"])
                                     if self.on_status:
-                                        self.on_status(reply)
+                                        self.on_status(json_reply)
                             else:
                                 # If the socket is in the read list, but no data, sleep
                                 force_sleep = True
@@ -138,10 +143,12 @@ class TuyaClient(threading.Thread):
 
                 while not self.command_queue.empty():
                     command, args, reply_queue = self.command_queue.get()
+                    logger.debug("TuyaClient: got command %s %s %s", command, args, reply_queue)
                     result = command(*args)
                     reply_queue.put(result)
 
                 if not self.connection or force_sleep:
+                    logger.debug("TuyaClient: sleeping..")
                     time.sleep(HEART_BEAT_PING_TIME/2)
             except Exception:
                 logger.exception("TuyaClient: Unexpected exception")
@@ -160,7 +167,9 @@ class TuyaClient(threading.Thread):
         if self.connection == None:
             self._connect()
         try:
+            logger.debug("TuyaClient: ---------------> _status waiting for reply")
             data = status(self.device, connection=self.connection, seq=self.seq)
+            logger.debug("TuyaClient: ---------------> _status reply %s", data)
             self.seq += 1
             return data
         except socket.error:
@@ -174,10 +183,13 @@ class TuyaClient(threading.Thread):
         self._interrupt()
         reply = None
         try:
+            logger.debug("TuyaClient: ---------------> status waiting for reply")
             reply = reply_queue.get(timeout=2)
+            logger.debug("TuyaClient: ---------------> status reply %s", reply)
             return reply
         except queue.Empty:
             logger.warning("TuyaClient: No reply to status")
+            logger.debug("TuyaClient: ---------------> No reply to status")
 
 
     def _set_state(self, value: bool, idx: int = 1):
@@ -185,7 +197,9 @@ class TuyaClient(threading.Thread):
         if self.connection == None:
             self._connect()
         try:
+            logger.debug("TuyaClient: ---------------> _set_state waiting for reply")
             data = set_state(self.device, value, idx, connection=self.connection, seq=self.seq)
+            logger.debug("TuyaClient: ---------------> _set_state reply %s", data)
             self.seq += 1
             return data
         except socket.error:
@@ -199,7 +213,10 @@ class TuyaClient(threading.Thread):
         self._interrupt()
         reply = None
         try:
+            logger.debug("TuyaClient: ---------------> set_state waiting for reply")
             reply = reply_queue.get(timeout=2)
+            logger.debug("TuyaClient: ---------------> set_state reply %s", reply)
             return reply
         except queue.Empty:
             logger.warning("TuyaClient: No reply to set_state")
+            logger.debug("TuyaClient: ---------------> No reply to set_state")
